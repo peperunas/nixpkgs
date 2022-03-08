@@ -30,7 +30,7 @@ let
     owner = "llvm";
     repo = "llvm-project";
     rev = if rev != "" then rev else "llvmorg-${version}";
-    sha256 = "199yq3a214avcbi4kk2q0ajriifkvsr0l2dkx3a666m033ihi1ff";
+    sha256 = "0ybfhqgqsd12qx9rb6ljw7n2ws6mqw87pzgz7h0qh0sb7ygp382k";
   };
 
   llvm_meta = {
