@@ -1,4 +1,4 @@
-{ lib, stdenv, llvm_meta, cmake, python3, fetch, libcxx, libunwind, llvm, version
+{ lib, stdenv, llvm_meta, cmake, cxx-headers, python3, fetch, libcxx, libunwind, llvm, version
 , enableShared ? !stdenv.hostPlatform.isStatic
 , standalone ? stdenv.hostPlatform.useLLVM or false
 , withLibunwind ? !stdenv.isDarwin && !stdenv.isFreeBSD && !stdenv.hostPlatform.isWasm
@@ -32,7 +32,9 @@ stdenv.mkDerivation {
   nativeBuildInputs = [ cmake python3 ];
   buildInputs = lib.optional withLibunwind libunwind;
 
-  cmakeFlags = lib.optionals standalone [
+  cmakeFlags = [
+    "-DLIBCXXABI_LIBCXX_INCLUDES=${cxx-headers}/include/c++/v1" ]
+  lib.optionals standalone [
     "-DLLVM_ENABLE_LIBCXX=ON"
     "-DLIBCXXABI_USE_LLVM_UNWINDER=ON"
   ] ++ lib.optionals stdenv.hostPlatform.isWasm [
