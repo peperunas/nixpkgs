@@ -37,18 +37,11 @@ let
       ./purity.patch
       # https://reviews.llvm.org/D51899
       ./gnu-install-dirs.patch
-      # Revert: [Driver] Default to -fno-common for all targets
-      # https://reviews.llvm.org/D75056
-      #
-      # Maintains compatibility with packages that haven't been fixed yet, and
-      # matches gcc10's configuration in nixpkgs.
-      (fetchpatch {
-        revert = true;
-        url = "https://github.com/llvm/llvm-project/commit/0a9fc9233e172601e26381810d093e02ef410f65.diff";
-        stripLen = 1;
-        excludes = [ "docs/*" "test/*" ];
-        sha256 = "0gxgmi0qbm89mq911dahallhi8m6wa9vpklklqmxafx4rplrr8ph";
-      })
+      # Revert of https://reviews.llvm.org/D100879
+      # The malloc alignment assumption is incorrect for jemalloc and causes
+      # mis-compilation in firefox.
+      # See: https://bugzilla.mozilla.org/show_bug.cgi?id=1741454
+      ./revert-malloc-alignment-assumption.patch
       (substituteAll {
         src = ../../clang-11-12-LLVMgold-path.patch;
         libllvmLibdir = "${libllvm.lib}/lib";
