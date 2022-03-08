@@ -33,7 +33,7 @@ stdenv.mkDerivation {
   buildInputs = lib.optional withLibunwind libunwind;
 
   cmakeFlags = [
-    "-DLIBCXXABI_LIBCXX_INCLUDES=${cxx-headers}/include/c++/v1" ]
+    "-DLIBCXXABI_LIBCXX_INCLUDES=${cxx-headers}/include/c++/v1" ] ++
   lib.optionals standalone [
     "-DLLVM_ENABLE_LIBCXX=ON"
     "-DLIBCXXABI_USE_LLVM_UNWINDER=ON"
