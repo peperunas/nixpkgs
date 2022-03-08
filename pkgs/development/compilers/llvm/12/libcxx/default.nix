@@ -1,9 +1,16 @@
 { lib, stdenv, llvm_meta, fetch, cmake, python3, libcxxabi, llvm, fixDarwinDylibNames, version
 , enableShared ? !stdenv.hostPlatform.isStatic
+
+# If headersOnly is true, the resulting package would only include the headers.
+# Use this to break the circular dependency between libcxx and libcxxabi.
+#
+# Some context:
+# https://reviews.llvm.org/rG1687f2bbe2e2aaa092f942d4a97d41fad43eedfb
+, headersOnly ? false
 }:
 
-stdenv.mkDerivation {
-  pname = "libcxx";
+stdenv.mkDerivation rec {
+  pname = if headersOnly then "cxx-headers" else "libcxx";
   inherit version;
 
   src = fetch "libcxx" "05cx39ldlxchck454lgfly1xj0c7x65iyx4hqhiihrlg6p6qj854";
@@ -15,7 +22,7 @@ stdenv.mkDerivation {
     mv llvm-* llvm
   '';
 
-  outputs = [ "out" "dev" ];
+  outputs = [ "out" ] ++ lib.optional (!headersOnly) "dev";
 
   patches = [
     ./gnu-install-dirs.patch
@@ -30,17 +37,28 @@ stdenv.mkDerivation {
   nativeBuildInputs = [ cmake python3 ]
     ++ lib.optional stdenv.isDarwin fixDarwinDylibNames;
 
-  buildInputs = [ libcxxabi ];
+  buildInputs = lib.optionals (!headersOnly) [ libcxxabi ];
 
-  cmakeFlags = [
-    "-DLIBCXX_CXX_ABI=libcxxabi"
-  ] ++ lib.optional (stdenv.hostPlatform.isMusl || stdenv.hostPlatform.isWasi) "-DLIBCXX_HAS_MUSL_LIBC=1"
+  cmakeFlags = [ "-DLIBCXX_CXX_ABI=libcxxabi" ]
+    ++ lib.optional (stdenv.hostPlatform.isMusl || stdenv.hostPlatform.isWasi) "-DLIBCXX_HAS_MUSL_LIBC=1"
     ++ lib.optional (stdenv.hostPlatform.useLLVM or false) "-DLIBCXX_USE_COMPILER_RT=ON"
-    ++ lib.optional stdenv.hostPlatform.isWasm [
+    ++ lib.optionals stdenv.hostPlatform.isWasm [
       "-DLIBCXX_ENABLE_THREADS=OFF"
       "-DLIBCXX_ENABLE_FILESYSTEM=OFF"
       "-DLIBCXX_ENABLE_EXCEPTIONS=OFF"
     ] ++ lib.optional (!enableShared) "-DLIBCXX_ENABLE_SHARED=OFF";
+
+  buildFlags = lib.optional headersOnly "generate-cxx-headers";
+  installTargets = lib.optional headersOnly "install-cxx-headers";
+
+  # At this point, cxxabi headers would be installed in the dev output, which
+  # prevents moveToOutput from doing its job later in the build process.
+  postInstall = lib.optionalString (!headersOnly) ''
+    mv "$dev/include/c++/v1/"* "$out/include/c++/v1/"
+    pushd "$dev"
+    rmdir -p include/c++/v1
+    popd
+  '';
 
   passthru = {
     isLLVM = true;
@@ -53,6 +71,7 @@ stdenv.mkDerivation {
       libc++ is an implementation of the C++ standard library, targeting C++11,
       C++14 and above.
     '';
+
     # "All of the code in libc++ is dual licensed under the MIT license and the
     # UIUC License (a BSD-like license)":
     license = with lib.licenses; [ mit ncsa ];
