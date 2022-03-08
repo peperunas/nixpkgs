@@ -1,8 +1,7 @@
-{ lib, stdenv, llvm_meta, fetch, fetchpatch, substituteAll, cmake, libxml2, libllvm, version, clang-tools-extra_src, python3
+{ lib, stdenv, llvm_meta, src, substituteAll, cmake, libxml2, libllvm, version, python3
 , buildLlvmTools
 , fixDarwinDylibNames
 , enableManpages ? false
-, enablePolly ? false
 }:
 
 let
@@ -10,16 +9,8 @@ let
     pname = "clang";
     inherit version;
 
-    src = fetch "clang" "12sm91qx2m79cvj75a9aazf2x8xybjbd593dv6v7rxficpq8i0ha";
-    inherit clang-tools-extra_src;
-
-    unpackPhase = ''
-      unpackFile $src
-      mv clang-* clang
-      sourceRoot=$PWD/clang
-      unpackFile ${clang-tools-extra_src}
-      mv clang-tools-extra-* $sourceRoot/tools/extra
-    '';
+    inherit src;
+    sourceRoot = "source/clang";
 
     nativeBuildInputs = [ cmake python3 ]
       ++ lib.optional enableManpages python3.pkgs.sphinx
@@ -40,11 +31,7 @@ let
     ] ++ lib.optionals (stdenv.hostPlatform != stdenv.buildPlatform) [
       "-DLLVM_TABLEGEN_EXE=${buildLlvmTools.llvm}/bin/llvm-tblgen"
       "-DCLANG_TABLEGEN=${buildLlvmTools.libclang.dev}/bin/clang-tblgen"
-    ] ++ lib.optionals enablePolly [
-      "-DWITH_POLLY=ON"
-      "-DLINK_POLLY_INTO_TOOLS=ON"
     ];
-
 
     patches = [
       ./purity.patch
@@ -69,6 +56,8 @@ let
     ];
 
     postPatch = ''
+      (cd tools && ln -s ../../clang-tools-extra extra)
+
       sed -i -e 's/DriverArgs.hasArg(options::OPT_nostdlibinc)/true/' \
              -e 's/Args.hasArg(options::OPT_nostdlibinc)/true/' \
              lib/Driver/ToolChains/*.cpp
@@ -77,9 +66,6 @@ let
       sed -i '1s,^,find_package(Sphinx REQUIRED)\n,' docs/CMakeLists.txt
     '' + lib.optionalString stdenv.hostPlatform.isMusl ''
       sed -i -e 's/lgcc_s/lgcc_eh/' lib/Driver/ToolChains/*.cpp
-    '' + lib.optionalString stdenv.hostPlatform.isDarwin ''
-      substituteInPlace tools/extra/clangd/CMakeLists.txt \
-        --replace "NOT HAVE_CXX_ATOMICS64_WITHOUT_LIB" FALSE
     '';
 
     outputs = [ "out" "lib" "dev" "python" ];

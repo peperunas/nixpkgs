@@ -1,8 +1,7 @@
 { lib
 , stdenv
 , llvm_meta
-, fetch
-, fetchpatch
+, src
 , cmake
 , llvm
 , perl
@@ -13,7 +12,8 @@ stdenv.mkDerivation rec {
   pname = "openmp";
   inherit version;
 
-  src = fetch pname "0bh5cswgpc79awlq8j5i7hp355adaac7s6zaz0zwp6mkflxli1yi";
+  inherit src;
+  sourceRoot = "source/${pname}";
 
   patches = [
     # Fix compilation on aarch64-darwin, remove after the next release.
@@ -26,6 +26,10 @@ stdenv.mkDerivation rec {
 
   nativeBuildInputs = [ cmake perl ];
   buildInputs = [ llvm ];
+
+  cmakeFlags = [
+    "-DLIBOMPTARGET_BUILD_AMDGCN_BCLIB=OFF" # Building the AMDGCN device RTL currently fails
+  ];
 
   meta = llvm_meta // {
     homepage = "https://openmp.llvm.org/";

@@ -1,6 +1,6 @@
 { lib, stdenv, llvm_meta
 , buildLlvmTools
-, fetch
+, src
 , cmake
 , libxml2
 , libllvm
@@ -11,11 +11,20 @@ stdenv.mkDerivation rec {
   pname = "lld";
   inherit version;
 
-  src = fetch pname "1kk61i7z5bi9i11rzsd2b388d42if1c7a45zkaa4mk0yps67hyh1";
+  inherit src;
+  sourceRoot = "source/${pname}";
 
   patches = [
     ./gnu-install-dirs.patch
   ];
+
+  # On Darwin the llvm-config is perhaps not working fine as the
+  # LLVM_MAIN_SRC_DIR is not getting set correctly, and the build fails as the
+  # include path is not correct.
+  postPatch = lib.optionalString stdenv.isDarwin ''
+    substituteInPlace MachO/CMakeLists.txt --replace \
+      '(''${LLVM_MAIN_SRC_DIR}/' '(../'
+  '';
 
   nativeBuildInputs = [ cmake ];
   buildInputs = [ libllvm libxml2 ];

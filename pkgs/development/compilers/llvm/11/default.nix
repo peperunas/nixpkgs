@@ -1,6 +1,6 @@
 { lowPrio, newScope, pkgs, lib, stdenv, cmake
 , gccForLibs, preLibcCrossHeaders
-, libxml2, python3, isl, fetchurl, overrideCC, wrapCCWith, wrapBintoolsWith
+, libxml2, python3, isl, fetchFromGitHub, overrideCC, wrapCCWith, wrapBintoolsWith
 , buildLlvmTools # tools, but from the previous stage, for cross
 , targetLlvmLibraries # libraries, but from the next stage, for cross
 # This is the default binutils, but with *this* version of LLD rather
@@ -14,21 +14,24 @@
     if stdenv.targetPlatform.linker == "lld"
     then null
     else pkgs.bintools
+, darwin
 }:
 
 let
   release_version = "11.1.0";
   candidate = ""; # empty or "rcN"
   dash-candidate = lib.optionalString (candidate != "") "-${candidate}";
-  version = "${release_version}${dash-candidate}"; # differentiating these (variables) is important for RCs
+  rev = ""; # When using a Git commit
+  rev-version = ""; # When using a Git commit
+  version = if rev != "" then rev-version else "${release_version}${dash-candidate}";
   targetConfig = stdenv.targetPlatform.config;
 
-  fetch = name: sha256: fetchurl {
-    url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-${version}/${name}-${release_version}${candidate}.src.tar.xz";
-    inherit sha256;
+  src = fetchFromGitHub {
+    owner = "llvm";
+    repo = "llvm-project";
+    rev = if rev != "" then rev else "llvmorg-${version}";
+    sha256 = "0cjl0vssi4y2g4nfr710fb6cdhxmn5r0vis15sf088zsc5zydfhw";
   };
-
-  clang-tools-extra_src = fetch "clang-tools-extra" "18n1w1hkv931xzq02b34wglbv6zd6sd0r5kb8piwvag7klj7qw3n";
 
   llvm_meta = {
     license     = lib.licenses.ncsa;
@@ -37,7 +40,7 @@ let
   };
 
   tools = lib.makeExtensible (tools: let
-    callPackage = newScope (tools // { inherit stdenv cmake libxml2 python3 isl release_version version fetch buildLlvmTools; });
+    callPackage = newScope (tools // { inherit stdenv cmake libxml2 python3 isl release_version version src buildLlvmTools; });
     mkExtraBuildCommands0 = cc: ''
       rsrc="$out/resource-root"
       mkdir "$rsrc"
@@ -68,25 +71,11 @@ let
     # we need to reintroduce `outputSpecified` to get the expected behavior e.g. of lib.get*
     llvm = tools.libllvm.out // { outputSpecified = false; };
 
-    libllvm-polly = callPackage ./llvm {
-      inherit llvm_meta;
-      enablePolly = true;
-    };
-
-    llvm-polly = tools.libllvm-polly.lib // { outputSpecified = false; };
-
     libclang = callPackage ./clang {
-      inherit clang-tools-extra_src llvm_meta;
+      inherit llvm_meta;
     };
 
     clang-unwrapped = tools.libclang.out // { outputSpecified = false; };
-
-    clang-polly-unwrapped = callPackage ./clang {
-      inherit llvm_meta;
-      inherit clang-tools-extra_src;
-      libllvm = tools.libllvm-polly;
-      enablePolly = true;
-    };
 
     llvm-manpages = lowPrio (tools.libllvm.override {
       enableManpages = true;
@@ -136,6 +125,9 @@ let
 
     lldb = callPackage ./lldb {
       inherit llvm_meta;
+      inherit (darwin) libobjc bootstrap_cmds;
+      inherit (darwin.apple_sdk.libs) xpc;
+      inherit (darwin.apple_sdk.frameworks) Foundation Carbon Cocoa;
     };
 
     # Below, is the LLVM bootstrapping logic. It handles building a
@@ -226,25 +218,25 @@ let
   });
 
   libraries = lib.makeExtensible (libraries: let
-    callPackage = newScope (libraries // buildLlvmTools // { inherit stdenv cmake libxml2 python3 isl release_version version fetch; });
+    callPackage = newScope (libraries // buildLlvmTools // { inherit stdenv cmake libxml2 python3 isl release_version version src; });
   in {
 
     compiler-rt-libc = callPackage ./compiler-rt {
       inherit llvm_meta;
-      stdenv = if (stdenv.hostPlatform.useLLVM or false) || (stdenv.hostPlatform.isDarwin && stdenv.hostPlatform.isAarch64) || (stdenv.hostPlatform.isRiscV && stdenv.hostPlatform.is32bit)
+      stdenv = if stdenv.hostPlatform.useLLVM or false
                then overrideCC stdenv buildLlvmTools.clangNoCompilerRtWithLibc
                else stdenv;
     };
 
     compiler-rt-no-libc = callPackage ./compiler-rt {
       inherit llvm_meta;
-      stdenv = if (stdenv.hostPlatform.useLLVM or false) || (stdenv.hostPlatform.isDarwin && stdenv.hostPlatform.isAarch64)
+      stdenv = if stdenv.hostPlatform.useLLVM or false
                then overrideCC stdenv buildLlvmTools.clangNoCompilerRt
                else stdenv;
     };
 
     # N.B. condition is safe because without useLLVM both are the same.
-    compiler-rt = if stdenv.hostPlatform.isAndroid || (stdenv.hostPlatform.isDarwin && stdenv.hostPlatform.isAarch64) || (stdenv.hostPlatform.libc == "newlib")
+    compiler-rt = if stdenv.hostPlatform.isAndroid
       then libraries.compiler-rt-libc
       else libraries.compiler-rt-no-libc;
 
@@ -254,23 +246,28 @@ let
 
     libcxx = callPackage ./libcxx {
       inherit llvm_meta;
-      stdenv = if (stdenv.hostPlatform.useLLVM or false) || (stdenv.hostPlatform.isDarwin && stdenv.hostPlatform.isAarch64)
+      stdenv = if stdenv.hostPlatform.useLLVM or false
                then overrideCC stdenv buildLlvmTools.clangNoLibcxx
                else stdenv;
     };
 
-    libcxxabi = callPackage ./libcxxabi {
-      inherit llvm_meta;
-      stdenv = if (stdenv.hostPlatform.useLLVM or false) || (stdenv.hostPlatform.isDarwin && stdenv.hostPlatform.isAarch64)
+    libcxxabi = let
+      stdenv_ = if stdenv.hostPlatform.useLLVM or false
                then overrideCC stdenv buildLlvmTools.clangNoLibcxx
                else stdenv;
+      cxx-headers = callPackage ./libcxx {
+        inherit llvm_meta;
+        stdenv = stdenv_;
+        headersOnly = true;
+      };
+    in callPackage ./libcxxabi {
+      stdenv = stdenv_;
+      inherit llvm_meta cxx-headers;
     };
 
     libunwind = callPackage ./libunwind {
       inherit llvm_meta;
-      stdenv = if (stdenv.hostPlatform.useLLVM or false) || (stdenv.hostPlatform.isDarwin && stdenv.hostPlatform.isAarch64)
-               then overrideCC stdenv buildLlvmTools.clangNoLibcxx
-               else stdenv;
+      stdenv = overrideCC stdenv buildLlvmTools.clangNoLibcxx;
     };
 
     openmp = callPackage ./openmp {

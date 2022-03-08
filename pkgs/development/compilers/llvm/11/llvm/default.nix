@@ -1,6 +1,6 @@
 { lib, stdenv, llvm_meta
 , pkgsBuildBuild
-, fetch
+, src
 , fetchpatch
 , cmake
 , python3
@@ -12,6 +12,7 @@
 , version
 , release_version
 , zlib
+, which
 , buildLlvmTools
 , debugVersion ? false
 , enableManpages ? false
@@ -20,7 +21,7 @@
   || stdenv.isAarch64 # broken for Ampere eMAG 8180 (c2.large.arm on Packet) #56245
   || stdenv.isAarch32 # broken for the armv7l builder
 )
-, enablePolly ? false # TODO should be on by default
+, enablePolly ? false
 }:
 
 let
@@ -34,17 +35,8 @@ in stdenv.mkDerivation (rec {
   pname = "llvm";
   inherit version;
 
-  src = fetch pname "199yq3a214avcbi4kk2q0ajriifkvsr0l2dkx3a666m033ihi1ff";
-  polly_src = fetch "polly" "031r23ijhx7v93a5n33m2nc0x9xyqmx0d8xg80z7q971p6qd63sq";
-
-  unpackPhase = ''
-    unpackFile $src
-    mv llvm-${release_version}* llvm
-    sourceRoot=$PWD/llvm
-  '' + optionalString enablePolly ''
-    unpackFile $polly_src
-    mv polly-* $sourceRoot/tools/polly
-  '';
+  inherit src;
+  sourceRoot = "source/${pname}";
 
   outputs = [ "out" "lib" "dev" "python" ];
 
@@ -54,7 +46,10 @@ in stdenv.mkDerivation (rec {
   buildInputs = [ libxml2 libffi ]
     ++ optional enablePFM libpfm; # exegesis
 
-  propagatedBuildInputs = [ ncurses zlib ];
+  propagatedBuildInputs = optionals (stdenv.hostPlatform == stdenv.buildPlatform) [ ncurses ]
+    ++ [ zlib ];
+
+  checkInputs = [ which ];
 
   patches = [
     # When cross-compiling we configure llvm-config-native with an approximation
@@ -64,31 +59,11 @@ in stdenv.mkDerivation (rec {
     ../../llvm-config-link-static.patch
 
     ./gnu-install-dirs.patch
-    # On older CPUs (e.g. Hydra/wendy) we'd be getting an error in this test.
-    (fetchpatch {
-      name = "uops-CMOV16rm-noreg.diff";
-      url = "https://github.com/llvm/llvm-project/commit/9e9f991ac033.diff";
-      sha256 = "sha256:12s8vr6ibri8b48h2z38f3afhwam10arfiqfy4yg37bmc054p5hi";
-      stripLen = 1;
-    })
-    # gcc-11 compat upstream patch
-    (fetchpatch {
-      url = "https://github.com/llvm/llvm-project/commit/b498303066a63a203d24f739b2d2e0e56dca70d1.patch";
-      sha256 = "sha256:0nh123kld0dgz2h941lng331dkj3wbm5lfxm375k1f569gv83hlk";
-      stripLen = 1;
-    })
 
-    # Fix invalid std::string(nullptr) for GCC 12
+    # Fix random compiler crashes: https://bugs.llvm.org/show_bug.cgi?id=50611
     (fetchpatch {
-      name = "nvptx-gcc-12.patch";
-      url = "https://github.com/llvm/llvm-project/commit/99e64623ec9b31def9375753491cc6093c831809.patch";
-      sha256 = "0zjfjgavqzi2ypqwqnlvy6flyvdz8hi1anwv0ybwnm2zqixg7za3";
-      stripLen = 1;
-    })
-    (fetchpatch {
-      name = "dfaemitter-gcc-12.patch";
-      url = "https://github.com/llvm/llvm-project/commit/0841916e87a39e3c223c986e8da31e4a9a1432e3.patch";
-      sha256 = "1kckghvsngs51mqm82asy0s9vr19h8aqbw43a0w44mccqw6bzrwf";
+      url = "https://raw.githubusercontent.com/archlinux/svntogit-packages/4764a4f8c920912a2bfd8b0eea57273acfe0d8a8/trunk/no-strict-aliasing-DwarfCompileUnit.patch";
+      sha256 = "18l6mrvm2vmwm77ckcnbjvh6ybvn72rhrb799d4qzwac4x2ifl7g";
       stripLen = 1;
     })
   ] ++ lib.optional enablePolly ./gnu-install-dirs-polly.patch;
@@ -102,6 +77,10 @@ in stdenv.mkDerivation (rec {
     substituteInPlace unittests/Support/CMakeLists.txt \
       --replace "Path.cpp" ""
     rm unittests/Support/Path.cpp
+    substituteInPlace unittests/IR/CMakeLists.txt \
+      --replace "PassBuilderCallbacksTest.cpp" ""
+    rm unittests/IR/PassBuilderCallbacksTest.cpp
+    rm test/tools/llvm-objcopy/ELF/mirror-permissions-unix.test
   '' + optionalString stdenv.hostPlatform.isMusl ''
     patch -p1 -i ${../../TLI-musl.patch}
     substituteInPlace unittests/Support/CMakeLists.txt \
@@ -115,38 +94,11 @@ in stdenv.mkDerivation (rec {
     rm test/DebugInfo/X86/convert-inlined.ll
     rm test/DebugInfo/X86/convert-linked.ll
     rm test/tools/dsymutil/X86/op-convert.test
-    rm test/tools/llvm-readobj/ELF/dependent-libraries.test
   '' + optionalString (stdenv.hostPlatform.system == "armv6l-linux") ''
     # Seems to require certain floating point hardware (NEON?)
     rm test/ExecutionEngine/frem.ll
   '' + ''
     patchShebangs test/BugPoint/compile-custom.ll.py
-  '' + ''
-    # Tweak tests to ignore namespace part of type to support
-    # gcc-12: https://gcc.gnu.org/PR103598.
-    # The change below mangles strings like:
-    #    CHECK-NEXT: Starting llvm::Function pass manager run.
-    # to:
-    #    CHECK-NEXT: Starting {{.*}}Function pass manager run.
-    for f in \
-      test/Other/new-pass-manager.ll \
-      test/Other/new-pm-defaults.ll \
-      test/Other/new-pm-lto-defaults.ll \
-      test/Other/new-pm-thinlto-defaults.ll \
-      test/Other/pass-pipeline-parsing.ll \
-      test/Transforms/Inline/cgscc-incremental-invalidate.ll \
-      test/Transforms/Inline/clear-analyses.ll \
-      test/Transforms/LoopUnroll/unroll-loop-invalidation.ll \
-      test/Transforms/SCCP/ipsccp-preserve-analysis.ll \
-      test/Transforms/SCCP/preserve-analysis.ll \
-      test/Transforms/SROA/dead-inst.ll \
-      test/tools/gold/X86/new-pm.ll \
-      ; do
-      echo "PATCH: $f"
-      substituteInPlace $f \
-        --replace 'Starting llvm::' 'Starting {{.*}}' \
-        --replace 'Finished llvm::' 'Finished {{.*}}'
-    done
   '';
 
   # hacky fix: created binaries need to be run before installation
@@ -188,8 +140,6 @@ in stdenv.mkDerivation (rec {
     # file and doesn't link zlib as well.
     # https://github.com/ClangBuiltLinux/tc-build/issues/150#issuecomment-845418812
     "-DLLVM_ENABLE_LIBXML2=OFF"
-    # This is a Shared Library not tied to LLVM_ENABLE_PIC
-    "-DLLVM_TOOL_REMARKS_SHLIB_BUILD=OFF"
   ] ++ optionals enableManpages [
     "-DLLVM_BUILD_DOCS=ON"
     "-DLLVM_ENABLE_SPHINX=ON"
@@ -259,7 +209,7 @@ in stdenv.mkDerivation (rec {
     cp NATIVE/bin/llvm-config $dev/bin/llvm-config-native
   '';
 
-  doCheck = stdenv.isLinux && (!stdenv.isx86_32) && (!stdenv.hostPlatform.isMusl) && (!stdenv.hostPlatform.isRiscV)
+  doCheck = stdenv.isLinux && (!stdenv.isx86_32) && (!stdenv.hostPlatform.isMusl)
     && (stdenv.hostPlatform == stdenv.buildPlatform);
 
   checkTarget = "check-all";

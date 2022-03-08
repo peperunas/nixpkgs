@@ -1,39 +1,34 @@
-{ lib, stdenv, llvm_meta, cmake, fetch, libcxx, libunwind, llvm, version
+{ lib, stdenv, llvm_meta, cmake, python3, src, cxx-headers, libunwind, version
 , enableShared ? !stdenv.hostPlatform.isStatic
 , standalone ? stdenv.hostPlatform.useLLVM or false
 , withLibunwind ? !stdenv.isDarwin && !stdenv.isFreeBSD && !stdenv.hostPlatform.isWasm
 }:
 
-stdenv.mkDerivation {
+stdenv.mkDerivation rec {
   pname = "libcxxabi";
   inherit version;
 
-  src = fetch "libcxxabi" "1azcf31mxw59hb1x17xncnm3dyw90ylh8rqx462lvypqh3nr6c8l";
+  inherit src;
+  sourceRoot = "source/${pname}";
 
   outputs = [ "out" "dev" ];
 
-  postUnpack = ''
-    unpackFile ${libcxx.src}
-    mv libcxx-* libcxx
-    unpackFile ${llvm.src}
-    mv llvm-* llvm
-  '' + lib.optionalString stdenv.isDarwin ''
+  postUnpack = lib.optionalString stdenv.isDarwin ''
     export TRIPLE=x86_64-apple-darwin
-  '' + lib.optionalString stdenv.hostPlatform.isMusl ''
-    patch -p1 -d libcxx -i ${../../libcxx-0001-musl-hacks.patch}
   '' + lib.optionalString stdenv.hostPlatform.isWasm ''
     patch -p1 -d llvm -i ${./wasm.patch}
   '';
 
   patches = [
-    ./no-threads.patch
     ./gnu-install-dirs.patch
   ];
 
-  nativeBuildInputs = [ cmake ];
+  nativeBuildInputs = [ cmake python3 ];
   buildInputs = lib.optional withLibunwind libunwind;
 
-  cmakeFlags = lib.optionals standalone [
+  cmakeFlags = [
+    "-DLIBCXXABI_LIBCXX_INCLUDES=${cxx-headers}/include/c++/v1"
+  ] ++ lib.optionals standalone [
     "-DLLVM_ENABLE_LIBCXX=ON"
   ] ++ lib.optionals (standalone && withLibunwind) [
     "-DLIBCXXABI_USE_LLVM_UNWINDER=ON"
@@ -51,7 +46,7 @@ stdenv.mkDerivation {
         # the magic combination of necessary CMake variables
         # if you fancy a try, take a look at
         # https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling
-        ${stdenv.cc.targetPrefix}install_name_tool -id $out/$file $file
+        install_name_tool -id $out/$file $file
       done
       make install
       install -d 755 $out/include

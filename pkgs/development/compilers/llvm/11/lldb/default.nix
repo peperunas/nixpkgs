@@ -1,5 +1,6 @@
 { lib, stdenv, llvm_meta
-, fetch
+, runCommand
+, src
 , cmake
 , zlib
 , ncurses
@@ -11,7 +12,12 @@
 , libclang
 , python3
 , version
-, darwin
+, libobjc
+, xpc
+, Foundation
+, bootstrap_cmds
+, Carbon
+, Cocoa
 , lit
 , makeWrapper
 , enableManpages ? false
@@ -21,10 +27,16 @@ stdenv.mkDerivation (rec {
   pname = "lldb";
   inherit version;
 
-  src = fetch pname "1vlyg015dyng43xqb8cg2l6r9ix8klibxsajazbfnckdnh54hwxj";
+  inherit src;
+  sourceRoot = "source/${pname}";
 
   patches = [
     ./procfs.patch
+    (runCommand "resource-dir.patch" {
+      clangLibDir = "${libclang.lib}/lib";
+    } ''
+      substitute '${./resource-dir.patch}' "$out" --subst-var clangLibDir
+    '')
     ./gnu-install-dirs.patch
   ];
 
@@ -37,14 +49,18 @@ stdenv.mkDerivation (rec {
   ];
 
   buildInputs = [
-    ncurses zlib libedit libxml2 libllvm
+    ncurses
+    zlib
+    libedit
+    libxml2
+    libllvm
   ] ++ lib.optionals stdenv.isDarwin [
-    darwin.libobjc
-    darwin.apple_sdk.libs.xpc
-    darwin.apple_sdk.frameworks.Foundation
-    darwin.bootstrap_cmds
-    darwin.apple_sdk.frameworks.Carbon
-    darwin.apple_sdk.frameworks.Cocoa
+    libobjc
+    xpc
+    Foundation
+    bootstrap_cmds
+    Carbon
+    Cocoa
   ];
 
   hardeningDisable = [ "format" ];
@@ -82,7 +98,7 @@ stdenv.mkDerivation (rec {
     # vscode:
     install -D ../tools/lldb-vscode/package.json $out/share/vscode/extensions/llvm-org.lldb-vscode-0.1.0/package.json
     mkdir -p $out/share/vscode/extensions/llvm-org.lldb-vscode-0.1.0/bin
-    ln -s $out/bin/llvm-vscode $out/share/vscode/extensions/llvm-org.lldb-vscode-0.1.0/bin
+    ln -s $out/bin/lldb-vscode $out/share/vscode/extensions/llvm-org.lldb-vscode-0.1.0/bin
   '';
 
   meta = llvm_meta // {
@@ -99,7 +115,7 @@ stdenv.mkDerivation (rec {
   pname = "lldb-manpages";
 
   buildPhase = ''
-    make docs-man
+    make docs-lldb-man
   '';
 
   propagatedBuildInputs = [];
