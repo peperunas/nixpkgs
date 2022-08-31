@@ -4796,7 +4796,17 @@ with pkgs;
 
   bdsync = callPackage ../tools/backup/bdsync { };
 
-  beamerpresenter = qt6Packages.callPackage ../applications/office/beamerpresenter { };
+  beamerpresenter = beamerpresenter-mupdf;
+
+  beamerpresenter-mupdf = qt6Packages.callPackage ../applications/office/beamerpresenter {
+    useMupdf = true;
+    usePoppler = false;
+  };
+
+  beamerpresenter-poppler = qt6Packages.callPackage ../applications/office/beamerpresenter {
+    useMupdf = false;
+    usePoppler = true;
+  };
 
   beanstalkd = callPackage ../servers/beanstalkd { };
 
@@ -10828,6 +10838,8 @@ with pkgs;
     lua = lua5_3;
   };
 
+  silice = callPackage ../development/compilers/silice { };
+
   silver-searcher = callPackage ../tools/text/silver-searcher { };
 
   simpleproxy = callPackage ../tools/networking/simpleproxy { };
@@ -14452,6 +14464,9 @@ with pkgs;
     inherit (darwin.apple_sdk.frameworks) Security;
   };
   cargo-readme = callPackage ../development/tools/rust/cargo-readme {};
+  cargo-semver-checks = callPackage ../development/tools/rust/cargo-semver-checks {
+    inherit (darwin.apple_sdk.frameworks) Security;
+  };
   cargo-sort = callPackage ../development/tools/rust/cargo-sort { };
   cargo-spellcheck = callPackage ../development/tools/rust/cargo-spellcheck {
     inherit (darwin.apple_sdk.frameworks) Security;
@@ -25255,6 +25270,8 @@ with pkgs;
   };
   flat-remix-gtk = callPackage ../data/themes/flat-remix-gtk { };
   flat-remix-gnome = callPackage ../data/themes/flat-remix-gnome { };
+
+  fluent-icon-theme = callPackage ../data/icons/fluent-icon-theme { };
 
   font-awesome_4 = (callPackage ../data/fonts/font-awesome { }).v4;
   font-awesome_5 = (callPackage ../data/fonts/font-awesome { }).v5;
