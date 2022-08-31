@@ -27,7 +27,6 @@ stdenv.mkDerivation rec {
 
   buildInputs = [
     libsndfile
-    python3
   ];
 
   wafConfigureFlags = [
